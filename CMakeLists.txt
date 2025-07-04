@@ -60,4 +60,24 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
+install(
+  DIRECTORY include/
+  DESTINATION include
+)
+
+install(
+  TARGETS double_steering_drive_controller
+  EXPORT export_double_steering_drive_controller
+  LIBRARY DESTINATION lib
+  ARCHIVE DESTINATION lib
+  RUNTIME DESTINATION bin
+  INCLUDES DESTINATION include
+)
+
+install(
+  FILES double_steering_drive_plugin.xml
+  DESTINATION share/${PROJECT_NAME}
+)
+
+
 ament_package()

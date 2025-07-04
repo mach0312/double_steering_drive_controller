@@ -28,5 +28,6 @@
 
   <export>
     <build_type>ament_cmake</build_type>
+    <pluginlib plugin="${prefix}/double_steering_drive_plugin.xml"/>
   </export>
 </package>
