@@ -377,9 +377,11 @@ controller_interface::return_type DoubleSteeringDriveController::update(
   Eigen::Vector3d v_rear_vec = linear_command_vec + v_rot_r;
 
   double velocity_front = v_front_vec.head<2>().norm()/front_wheel_radius;
-  // velocity_front *= sign_factor_front;
   double velocity_rear = v_rear_vec.head<2>().norm()/rear_wheel_radius;
-  // velocity_rear *= sign_factor_rear;
+
+  // 최대 조향 각도 변화량 계산
+  double dt = period.seconds();
+  double max_steering_delta = params_.max_steering_velocity * dt;
 
   //front_steering_angle 계산
   double target_steering_front = std::atan2(v_front_vec.y(), v_front_vec.x());
@@ -397,14 +399,35 @@ controller_interface::return_type DoubleSteeringDriveController::update(
     front_steering_delta = target_steering_front - last_front_steering_angle_;
     front_steering_delta = wrapAngle(front_steering_delta);
   }
-  //
+
+  double scale_front = computeSpeedScale(abs(front_steering_delta), 
+                                         params_.min_phi_delta, 
+                                         params_.max_phi_delta, 
+                                         params_.steering_speed_scale_exponent, 
+                                         params_.min_reduced_scale);
+  velocity_front *= scale_front;
+
+  // 4) delta가 허용 범위를 초과하면 제한
+  // 각도 변화량이 최대 조향 각도 변화량을 초과하면 제한
+  // 각도를 업데이트하여 누적 각도와 일치시킴
+  if (front_steering_delta >= max_steering_delta) {
+      front_steering_delta = max_steering_delta;
+      last_front_steering_angle_ += max_steering_delta; // 각도를 업데이트
+    } else if (front_steering_delta < -max_steering_delta) {
+      front_steering_delta = -max_steering_delta;
+      last_front_steering_angle_ -= max_steering_delta; // 각도를 업데이트
+    } else {
+      // delta가 허용 범위 내에 있으면 그대로 사용
+      last_front_steering_angle_ = target_steering_front;
+    }
+
   cumulative_front_steering_angle_ += front_steering_delta;
 
-  last_front_steering_angle_ = target_steering_front;
-
-  double steering_angle_front = cumulative_front_steering_angle_;
+  double steering_angle_front = last_front_steering_angle_;
   double steering_front_turns = cumulative_front_steering_angle_ / (2.0 * M_PI);
 
+
+  // rear_steering_angle 계산
   double target_steering_rear = std::atan2(v_rear_vec.y(), v_rear_vec.x());
   double rear_steering_delta = target_steering_rear - last_rear_steering_angle_;
   rear_steering_delta = wrapAngle(rear_steering_delta);
@@ -418,11 +441,33 @@ controller_interface::return_type DoubleSteeringDriveController::update(
     rear_steering_delta = target_steering_rear - last_rear_steering_angle_;
     rear_steering_delta = wrapAngle(rear_steering_delta);
   }
-  cumulative_rear_steering_angle_ += rear_steering_delta;
-  last_rear_steering_angle_ = target_steering_rear;
+  
+  // rear wheel속도 스케일링
+  // 조향 각도 변화량에 따라 속도를 조정
+  // 조향 각도 변화량이 클수록 속도를 줄입니다.
+  double scale_rear = computeSpeedScale(abs(rear_steering_delta),
+                                        params_.min_phi_delta,
+                                        params_.max_phi_delta,
+                                        params_.steering_speed_scale_exponent,
+                                        params_.min_reduced_scale);
+  velocity_rear *= scale_rear;
 
-  double steering_angle_rear = cumulative_rear_steering_angle_;
+  if (rear_steering_delta >= max_steering_delta) {
+      rear_steering_delta = max_steering_delta;
+      last_rear_steering_angle_ += max_steering_delta; // 각도를 업데이트
+    } else if (rear_steering_delta < -max_steering_delta) {
+      rear_steering_delta = -max_steering_delta;
+      last_rear_steering_angle_ -= max_steering_delta; // 각도를 업데이트
+    } else {
+      // delta가 허용 범위 내에 있으면 그대로 사용
+      last_rear_steering_angle_ = target_steering_rear;
+    }
+
+  cumulative_rear_steering_angle_ += rear_steering_delta;
+
+  double steering_angle_rear = last_rear_steering_angle_;
   double steering_rear_turns = cumulative_rear_steering_angle_ / (2.0 * M_PI);
+
 
   // RCLCPP_INFO(
   //   logger, "Front steering angle: %.2f rad (%.2f turns), Rear steering angle: %.2f rad (%.2f turns)",
@@ -767,6 +812,23 @@ double DoubleSteeringDriveController::wrapAngle(double angle)
   while (angle > M_PI) angle -= 2.0 * M_PI;
   while (angle < -M_PI) angle += 2.0 * M_PI;
   return angle;
+}
+
+double DoubleSteeringDriveController::computeSpeedScale(double phi_delta, double min_phi_delta, double max_phi_delta, double p, double min_scale)
+{
+  phi_delta = std::max(phi_delta, 0.0);
+
+  if (phi_delta >= max_phi_delta)
+  {
+      return min_scale;
+  }
+  else
+  {
+      double ratio = phi_delta / max_phi_delta;
+      double cos_term = (cos(M_PI * ratio) + 1.0) / 2.0;  // 0~1
+      double scale = min_scale + (1.0 - min_scale) * pow(cos_term, p);
+      return scale;
+  }
 }
 
 controller_interface::CallbackReturn DoubleSteeringDriveController::configure_wheel_side(

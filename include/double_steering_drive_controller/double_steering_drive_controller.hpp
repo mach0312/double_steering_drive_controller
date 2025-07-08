@@ -181,6 +181,7 @@ protected:
   bool is_first_update_ = false;
 
   static double wrapAngle(double angle);
+  static double computeSpeedScale(double phi_delta, double min_phi_delta, double max_phi_delta, double p, double min_scale);
 
   bool reset();
   void halt();

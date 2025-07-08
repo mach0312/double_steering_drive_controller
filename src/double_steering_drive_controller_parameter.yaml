@@ -252,7 +252,7 @@ double_steering_drive_controller:
   }
   max_steering_angle: {
     type: double,
-    default_value: 12.5644,
+    default_value: 2.4435,
     description: "Maximum steering angle in radians.",
     validation: {
       gt<>: [0.0]
@@ -260,9 +260,58 @@ double_steering_drive_controller:
   }
   min_steering_angle: {
     type: double,
-    default_value: -12.5644,
+    default_value: -2.4435,
     description: "Minimum steering angle in radians.",
     validation: {
       lt<>: [0.0]
+    }
+  }
+  max_steering_velocity: {
+    type: double,
+    default_value: 0.5,
+    description: "Maximum steering velocity in radians per second.",
+    validation: {
+      gt<>: [0.0]
+    }
+  }
+
+  reduce_wheel_speed_until_steering_reached: {
+    type: bool,
+    default_value: true,
+    description: "Reduce wheel speed until the steering angle has been reached.",
+  }
+
+  steering_speed_scale_exponent: {
+    type: double,
+    default_value: 2.0,
+    description: "Exponent for scaling wheel speed based on steering angle error.",
+    validation: {
+      gt<>: [0.0]
+    }
+  }
+
+  min_reduced_scale: {
+    type: double,
+    default_value: 0.01,
+    description: "Minimum scale factor for reducing wheel speed when steering angle is changing.",
+    validation: {
+      gt<>: [0.0]
+    }
+  }
+
+  min_phi_delta: {
+    type: double,
+    default_value: 0.2618, # 15 degrees in radians
+    description: "Minimum steering angle change (in radians) to reduce wheel speed.",
+    validation: {
+      gt<>: [0.0]
+    }
+  }
+  max_phi_delta: {
+    type: double,
+    default_value: 1.5704, # 90 degrees in radians
+    description: "Maximum steering angle change (in radians) to reduce wheel speed.",
+    validation: {
+      gt<>: [0.0]
     }
   }
