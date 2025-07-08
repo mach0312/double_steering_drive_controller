@@ -118,6 +118,9 @@ controller_interface::return_type DoubleSteeringDriveController::update(
 {
   double front_steering_feedback = 0.0;
   double rear_steering_feedback = 0.0;
+
+  bool old_updated = false;
+  bool zero_command = false;
   
   // 주기적으로 호출되어 로봇의 상태를 업데이트하고, 명령을 바퀴에 전달합니다.
   auto logger = get_node()->get_logger();
@@ -147,6 +150,7 @@ controller_interface::return_type DoubleSteeringDriveController::update(
     last_command_msg->twist.linear.x = 0.0;
     last_command_msg->twist.linear.y = 0.0;
     last_command_msg->twist.angular.z = 0.0;
+    old_updated = true;
   }
 
   // 명령 제한자(SpeedLimiter)로 속도 제한
@@ -154,6 +158,11 @@ controller_interface::return_type DoubleSteeringDriveController::update(
   double & linear_x_command = command.twist.linear.x;
   double & linear_y_command = command.twist.linear.y;
   double & angular_command = command.twist.angular.z;
+
+  if (linear_x_command == 0.0 && linear_y_command == 0.0 && angular_command == 0.0)
+  {
+    zero_command = true; // 명령이 모두 0이면 zero_command 플래그 설정
+  }
 
   previous_update_timestamp_ = time;
 
@@ -384,10 +393,16 @@ controller_interface::return_type DoubleSteeringDriveController::update(
   double max_steering_delta = params_.max_steering_velocity * dt;
 
   //front_steering_angle 계산
-  // 1) front wheel 속도 벡터 계산
-  double target_steering_front = atan2(v_front_vec.y(), v_front_vec.x());
+  // 1) front_steering_angle 계산
+  double target_steering_front;
+  if (old_updated || zero_command) {
+    target_steering_front = last_front_steering_angle_; // 이전 업데이트가 오래된 경우 last_front_steering_angle_를 사용
+  }
+  else{
+    target_steering_front = atan2(v_front_vec.y(), v_front_vec.x());
+  }
 
-  // 2) front wheel 속도 벡터와 last_front_steering_angle_ 사이의 delta 계산
+  // 2) front_steering_angle과 last_front_steering_angle_ 사이의 delta 계산
   double front_steering_delta = target_steering_front - last_front_steering_angle_;
   front_steering_delta = wrapAngle(front_steering_delta);
 
@@ -403,13 +418,13 @@ controller_interface::return_type DoubleSteeringDriveController::update(
     front_steering_delta = wrapAngle(front_steering_delta);
   }
 
-  // 4) 누적 각도가 허용 범위를 초과하면 제한
+  // 4) 예상 누적 각도가 허용 범위를 초과하면 제한
   double predictive_cumulative_front_steering_angle_ = cumulative_front_steering_angle_ + front_steering_delta;
   if (abs(predictive_cumulative_front_steering_angle_) > params_.max_steering_angle)
   {
     RCLCPP_WARN(
-      logger, "Front steering angle exceeds max limit, flipping direction. "
-              "Cumulative front steering angle: %.2f rad, Max limit: %.2f rad",
+      logger, "\033[33mFront steering angle exceeds max limit, flipping direction. "
+              "Cumulative front steering angle: %.2f rad, Max limit: %.2f rad\033[0m",
       predictive_cumulative_front_steering_angle_, params_.max_steering_angle);
     // 각도를 180도 돌려서 최소 회전각으로 유지
     target_steering_front = wrapAngle(target_steering_front + M_PI);
@@ -448,10 +463,16 @@ controller_interface::return_type DoubleSteeringDriveController::update(
 
 
   // rear_steering_angle 계산
-  // 1) rear wheel 속도 벡터 계산
-  double target_steering_rear = atan2(v_rear_vec.y(), v_rear_vec.x());
+  // 1) rear_steering_angle 계산
+  double target_steering_rear;
+  if (old_updated || zero_command) {
+    target_steering_rear = last_rear_steering_angle_; // 이전 업데이트가 오래된 경우 last_rear_steering_angle_를 사용
+  }
+  else{
+    target_steering_rear = atan2(v_rear_vec.y(), v_rear_vec.x());
+  }
 
-  // 2) rear wheel 속도 벡터와 last_rear_steering_angle_ 사이의 delta 계산
+  // 2) rear_steering_angle과 last_rear_steering_angle_ 사이의 delta 계산
   double rear_steering_delta = target_steering_rear - last_rear_steering_angle_;
   rear_steering_delta = wrapAngle(rear_steering_delta);
 
@@ -466,13 +487,13 @@ controller_interface::return_type DoubleSteeringDriveController::update(
     rear_steering_delta = wrapAngle(rear_steering_delta);
   }
 
-  // 4) 누적 각도가 허용 범위를 초과하면 제한
+  // 4) 예상 누적 각도가 허용 범위를 초과하면 제한
   double predictive_cumulative_rear_steering_angle_ = cumulative_rear_steering_angle_ + rear_steering_delta;
   if (abs(predictive_cumulative_rear_steering_angle_) > params_.max_steering_angle)
   {
     RCLCPP_WARN(
-      logger, "Rear steering angle exceeds max limit, flipping direction. "
-              "Cumulative rear steering angle: %.2f rad, Max limit: %.2f rad",
+      logger, "\033[33mRear steering angle exceeds max limit, flipping direction. "
+              "Cumulative rear steering angle: %.2f rad, Max limit: %.2f rad\033[0m",
       predictive_cumulative_rear_steering_angle_, params_.max_steering_angle);
     // 각도를 180도 돌려서 최소 회전각으로 유지
     target_steering_rear = wrapAngle(target_steering_rear + M_PI);
