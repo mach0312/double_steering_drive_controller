@@ -258,14 +258,7 @@ double_steering_drive_controller:
       gt<>: [0.0]
     }
   }
-  min_steering_angle: {
-    type: double,
-    default_value: -2.4435,
-    description: "Minimum steering angle in radians.",
-    validation: {
-      lt<>: [0.0]
-    }
-  }
+
   max_steering_velocity: {
     type: double,
     default_value: 0.5,

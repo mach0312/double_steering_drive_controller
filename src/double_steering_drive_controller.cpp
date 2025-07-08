@@ -384,17 +384,37 @@ controller_interface::return_type DoubleSteeringDriveController::update(
   double max_steering_delta = params_.max_steering_velocity * dt;
 
   //front_steering_angle 계산
-  double target_steering_front = std::atan2(v_front_vec.y(), v_front_vec.x());
+  // 1) front wheel 속도 벡터 계산
+  double target_steering_front = atan2(v_front_vec.y(), v_front_vec.x());
+
+  // 2) front wheel 속도 벡터와 last_front_steering_angle_ 사이의 delta 계산
   double front_steering_delta = target_steering_front - last_front_steering_angle_;
   front_steering_delta = wrapAngle(front_steering_delta);
 
   // 3) delta가 90도(π/2) 초과면 flip
-  if (std::abs(front_steering_delta) > M_PI / 2.0) {
+  if (abs(front_steering_delta) > M_PI / 2.0) {
     // 각도를 180도 돌려서 최소 회전각으로 유지
     target_steering_front = wrapAngle(target_steering_front + M_PI);
     // 속도 반전
     velocity_front *= -1.0;
 
+    // delta 재계산
+    front_steering_delta = target_steering_front - last_front_steering_angle_;
+    front_steering_delta = wrapAngle(front_steering_delta);
+  }
+
+  // 4) 누적 각도가 허용 범위를 초과하면 제한
+  double predictive_cumulative_front_steering_angle_ = cumulative_front_steering_angle_ + front_steering_delta;
+  if (abs(predictive_cumulative_front_steering_angle_) > params_.max_steering_angle)
+  {
+    RCLCPP_WARN(
+      logger, "Front steering angle exceeds max limit, flipping direction. "
+              "Cumulative front steering angle: %.2f rad, Max limit: %.2f rad",
+      predictive_cumulative_front_steering_angle_, params_.max_steering_angle);
+    // 각도를 180도 돌려서 최소 회전각으로 유지
+    target_steering_front = wrapAngle(target_steering_front + M_PI);
+    // 속도 반전
+    velocity_front *= -1.0;
     // delta 재계산
     front_steering_delta = target_steering_front - last_front_steering_angle_;
     front_steering_delta = wrapAngle(front_steering_delta);
@@ -424,15 +444,36 @@ controller_interface::return_type DoubleSteeringDriveController::update(
   cumulative_front_steering_angle_ += front_steering_delta;
 
   double steering_angle_front = last_front_steering_angle_;
-  double steering_front_turns = cumulative_front_steering_angle_ / (2.0 * M_PI);
+  // double steering_front_turns = cumulative_front_steering_angle_ / (2.0 * M_PI);
 
 
   // rear_steering_angle 계산
-  double target_steering_rear = std::atan2(v_rear_vec.y(), v_rear_vec.x());
+  // 1) rear wheel 속도 벡터 계산
+  double target_steering_rear = atan2(v_rear_vec.y(), v_rear_vec.x());
+
+  // 2) rear wheel 속도 벡터와 last_rear_steering_angle_ 사이의 delta 계산
   double rear_steering_delta = target_steering_rear - last_rear_steering_angle_;
   rear_steering_delta = wrapAngle(rear_steering_delta);
+
   // 3) delta가 90도(π/2) 초과면 flip
-  if (std::abs(rear_steering_delta) > M_PI / 2.0) {
+  if (abs(rear_steering_delta) > M_PI / 2.0) {
+    // 각도를 180도 돌려서 최소 회전각으로 유지
+    target_steering_rear = wrapAngle(target_steering_rear + M_PI);
+    // 속도 반전
+    velocity_rear *= -1.0;
+    // delta 재계산
+    rear_steering_delta = target_steering_rear - last_rear_steering_angle_;
+    rear_steering_delta = wrapAngle(rear_steering_delta);
+  }
+
+  // 4) 누적 각도가 허용 범위를 초과하면 제한
+  double predictive_cumulative_rear_steering_angle_ = cumulative_rear_steering_angle_ + rear_steering_delta;
+  if (abs(predictive_cumulative_rear_steering_angle_) > params_.max_steering_angle)
+  {
+    RCLCPP_WARN(
+      logger, "Rear steering angle exceeds max limit, flipping direction. "
+              "Cumulative rear steering angle: %.2f rad, Max limit: %.2f rad",
+      predictive_cumulative_rear_steering_angle_, params_.max_steering_angle);
     // 각도를 180도 돌려서 최소 회전각으로 유지
     target_steering_rear = wrapAngle(target_steering_rear + M_PI);
     // 속도 반전
@@ -463,10 +504,11 @@ controller_interface::return_type DoubleSteeringDriveController::update(
       last_rear_steering_angle_ = target_steering_rear;
     }
 
+  // 누적 조향 각도 업데이트
   cumulative_rear_steering_angle_ += rear_steering_delta;
 
   double steering_angle_rear = last_rear_steering_angle_;
-  double steering_rear_turns = cumulative_rear_steering_angle_ / (2.0 * M_PI);
+  // double steering_rear_turns = cumulative_rear_steering_angle_ / (2.0 * M_PI);
 
 
   // RCLCPP_INFO(
