@@ -32,8 +32,8 @@ public:
   explicit Odometry(size_t velocity_rolling_window_size = 10);
 
   void init(const rclcpp::Time & time);
-  bool update(double front_pos, double rear_pos, double front_steering_pos, double rear_steering_pos, const rclcpp::Time & time);
-  bool updateFromVelocity(double front_vel, double rear_vel, double front_steering_pos, double rear_steering_pos, const rclcpp::Time & time);
+  bool update(double front_pos, double rear_pos, double front_steering_pos, double rear_steering_pos, double wheel_base, const rclcpp::Time & time);
+  bool updateFromVelocity(double front_vel, double rear_vel, double front_steering_pos, double rear_steering_pos, double wheel_base, const rclcpp::Time & time);
   void updateOpenLoop(double linear_x, double linear_y, double angular, const rclcpp::Time & time);
   void resetOdometry();
 

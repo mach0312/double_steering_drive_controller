@@ -50,7 +50,7 @@ void Odometry::init(const rclcpp::Time & time)
 }
 
 // wheel 포지션 기반 제어시 odometry 업데이트
-bool Odometry::update(double front_pos, double rear_pos, double front_steering_pos, double rear_steering_pos, const rclcpp::Time & time)
+bool Odometry::update(double front_pos, double rear_pos, double front_steering_pos, double rear_steering_pos, double wheel_base, const rclcpp::Time & time)
 {
   // We cannot estimate the speed with very small time intervals:
   const double dt = time.seconds() - timestamp_.seconds();
@@ -71,70 +71,37 @@ bool Odometry::update(double front_pos, double rear_pos, double front_steering_p
   front_wheel_old_pos_ = front_wheel_cur_pos;
   rear_wheel_old_pos_ = rear_wheel_cur_pos;
 
-  updateFromVelocity(front_wheel_est_vel, rear_wheel_est_vel, front_steering_pos, rear_steering_pos, time);
+  updateFromVelocity(front_wheel_est_vel, rear_wheel_est_vel, front_steering_pos, rear_steering_pos, wheel_base, time);
 
   return true;
 }
 
 // wheel 속도 기반 제어시 odometry 업데이트
-bool Odometry::updateFromVelocity(double front_vel, double rear_vel, double front_steering_pos, double rear_steering_pos, const rclcpp::Time & time)
+bool Odometry::updateFromVelocity(double front_vel, double rear_vel, double front_steering_pos, double rear_steering_pos, double wheel_base, const rclcpp::Time & time)
 {
   const double dt = time.seconds() - timestamp_.seconds();
   if (dt < 0.0001)
   {
     return false;  // Interval too small to integrate with
   }
-  const double v = 0.5 * (front_vel + rear_vel);
 
-  const double tan_delta_f = tan(front_steering_pos);
-  const double tan_delta_r = tan(rear_steering_pos);
+  const double v_front_x = front_vel * cos(front_steering_pos);
+  const double v_front_y = front_vel * sin(front_steering_pos);
+  const double v_rear_x = rear_vel * cos(rear_steering_pos);
+  const double v_rear_y = rear_vel * sin(rear_steering_pos);
 
-  if (std::abs(tan_delta_f - tan_delta_r) < 1e-3)
-  {
-    // Crab motion
-    const double v_long = v * cos(front_steering_pos);
-    const double v_lat = v * sin(front_steering_pos);
+  const double linear_x = (v_front_x + v_rear_x) / 2.0;
+  const double linear_y = (v_front_y + v_rear_y) / 2.0;
+  const double angular_z = (v_front_y - v_rear_y) / wheel_base;
 
-    linear_x_ = v_long * cos(heading_) - v_lat * sin(heading_);
-    linear_y_ = v_long * sin(heading_) + v_lat * cos(heading_);
-    angular_ = 0.0;
+  integrateRungeKutta2(linear_x * dt, linear_y * dt, angular_z * dt);
 
-    integrateRungeKutta2(linear_x_ * dt, linear_y_ * dt, angular_ * dt);
-  }
-  else
-  {
-    // Turning motion
-    const double denom = tan_delta_f + tan_delta_r;
-
-    if (std::abs(denom) < 1e-6)
-    {
-      // straight motion
-      linear_x_ = v * cos(heading_);
-      linear_y_ = v * sin(heading_);
-      angular_ = 0.0;
-
-      integrateRungeKutta2(linear_x_ * dt, linear_y_ * dt, angular_ * dt);
-    }
-    else
-    {
-      const double R_center = (2.0 * wheel_base_) / denom;
-      angular_ = v / R_center;
-
-      const double linear = v * dt;
-      const double angular_delta = angular_ * dt;
-
-      integrateExact(linear, linear_y_, angular_delta);
-
-      linear_x_ = v;
-      linear_y_ = 0.0;
-    }
-  }
   timestamp_ = time;
 
   // Estimate speeds using a rolling mean to filter them out:
-  linear_x_accumulator_.accumulate(linear_x_ / dt);
-  linear_y_accumulator_.accumulate(linear_y_ / dt);
-  angular_accumulator_.accumulate(angular_ / dt);
+  linear_x_accumulator_.accumulate(linear_x);
+  linear_y_accumulator_.accumulate(linear_y);
+  angular_accumulator_.accumulate(angular_z);
 
   linear_x_ = linear_x_accumulator_.getRollingMean();
   linear_y_ = linear_y_accumulator_.getRollingMean();
@@ -197,11 +164,13 @@ void Odometry::integrateExact(double linear_x, double linear_y, double angular)
   else
   {
     /// Exact integration (should solve problems when angular is zero):
-    const double heading_old = heading_;
-    const double r = linear_x / angular;
+    // const double heading_old = heading_;
+    // const double r = linear_x / angular;
     heading_ += angular;
-    x_ += r * (sin(heading_) - sin(heading_old));
-    y_ += -r * (cos(heading_) - cos(heading_old));
+    double global_dx = linear_x * cos(heading_) - linear_y * sin(heading_);
+    double global_dy = linear_x * sin(heading_) + linear_y * cos(heading_);
+    x_ += global_dx;
+    y_ += global_dy;
   }
 }
 

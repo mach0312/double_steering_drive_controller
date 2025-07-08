@@ -28,6 +28,7 @@
 #include "lifecycle_msgs/msg/state.hpp"
 #include "rclcpp/logging.hpp"
 #include "tf2/LinearMath/Quaternion.h"
+#include "visualization_msgs/msg/marker.hpp"
 
 namespace
 {
@@ -117,6 +118,7 @@ controller_interface::return_type DoubleSteeringDriveController::update(
 {
   double front_steering_feedback = 0.0;
   double rear_steering_feedback = 0.0;
+  
   // 주기적으로 호출되어 로봇의 상태를 업데이트하고, 명령을 바퀴에 전달합니다.
   auto logger = get_node()->get_logger();
   if (get_state().id() == State::PRIMARY_STATE_INACTIVE)
@@ -167,6 +169,7 @@ controller_interface::return_type DoubleSteeringDriveController::update(
   }
   else
   {
+
     // 클로즈 루프 모드: 바퀴 피드백으로 오도메트리 갱신
     double front_wheel_feedback_mean = 0.0;
     double rear_wheel_feedback_mean = 0.0;
@@ -195,9 +198,10 @@ controller_interface::return_type DoubleSteeringDriveController::update(
       front_wheel_feedback_mean /= static_cast<double>(params_.wheels_per_side);
       rear_wheel_feedback_mean /= static_cast<double>(params_.wheels_per_side);
 
-    // 전방 및 후방 스티어링의 피드백 값을 평균 계산
+    // 전방 및 후방 스티어링의 피드백 값을 계산
     front_steering_feedback = registered_front_steering_handle_->feedback.get().get_value();
     rear_steering_feedback = registered_rear_steering_handle_->feedback.get().get_value();
+
     // 피드백 값이 유효하지 않은 경우 에러 처리
     if (std::isnan(front_steering_feedback) || std::isnan(rear_steering_feedback))
     {
@@ -207,19 +211,79 @@ controller_interface::return_type DoubleSteeringDriveController::update(
       return controller_interface::return_type::ERROR;
     }
 
+    // steering 시각화
+    if (steering_marker_pub_)
+    {
+      // 단위 벡터 길이 (m)
+      constexpr double arrow_length = 1.0;
+
+      // FRONT steering vector
+      visualization_msgs::msg::Marker front_marker;
+      front_marker.header.frame_id = params_.base_frame_id;
+      front_marker.header.stamp = time;
+      front_marker.ns = "front_steering_vector";
+      front_marker.id = 0;
+      front_marker.type = visualization_msgs::msg::Marker::ARROW;
+      front_marker.action = visualization_msgs::msg::Marker::ADD;
+      front_marker.scale.x = 0.05; // shaft diameter
+      front_marker.scale.y = 0.1;  // head diameter
+      front_marker.scale.z = 0.1;  // head length
+      front_marker.color.r = 0.0;
+      front_marker.color.g = 1.0;
+      front_marker.color.b = 0.0;
+      front_marker.color.a = 1.0;
+
+      geometry_msgs::msg::Point p_front_start, p_front_end;
+      p_front_start.x = wheel_base / 2.0;
+      p_front_start.y = 0.0;
+      p_front_start.z = 0.0;
+
+      p_front_end.x = p_front_start.x + arrow_length * std::cos(front_steering_feedback);
+      p_front_end.y = p_front_start.y + arrow_length * std::sin(front_steering_feedback);
+      p_front_end.z = 0.0;
+
+      front_marker.points.push_back(p_front_start);
+      front_marker.points.push_back(p_front_end);
+
+      steering_marker_pub_->publish(front_marker);
+
+      // REAR steering vector
+      visualization_msgs::msg::Marker rear_marker = front_marker;
+      rear_marker.ns = "rear_steering_vector";
+      rear_marker.id = 1;
+      rear_marker.color.r = 1.0;
+      rear_marker.color.g = 1.0;
+      rear_marker.color.b = 0.0;
+
+      geometry_msgs::msg::Point p_rear_start, p_rear_end;
+      p_rear_start.x = -wheel_base / 2.0;
+      p_rear_start.y = 0.0;
+      p_rear_start.z = 0.0;
+
+      p_rear_end.x = p_rear_start.x + arrow_length * std::cos(rear_steering_feedback);
+      p_rear_end.y = p_rear_start.y + arrow_length * std::sin(rear_steering_feedback);
+      p_rear_end.z = 0.0;
+
+      rear_marker.points.clear();
+      rear_marker.points.push_back(p_rear_start);
+      rear_marker.points.push_back(p_rear_end);
+
+      steering_marker_pub_->publish(rear_marker);
+    }
+
     // 위치 피드백을 사용하는 경우
     if (params_.position_feedback)
     {
       // 바퀴 위치 피드백을 사용하여 오도메트리 갱신
-      odometry_.update(front_wheel_feedback_mean, rear_wheel_feedback_mean, front_steering_feedback, rear_steering_feedback, time);
+      odometry_.update(front_wheel_feedback_mean, rear_wheel_feedback_mean, front_steering_feedback, rear_steering_feedback, wheel_base, time);
     }
+    // 속도 피드백을 사용하여 오도메트리 갱신
     else
     {
-      // 속도 피드백을 사용하여 오도메트리 갱신
       odometry_.updateFromVelocity(
         front_wheel_feedback_mean * front_wheel_radius * period.seconds(),
         rear_wheel_feedback_mean * rear_wheel_radius * period.seconds(),
-        front_steering_feedback, rear_steering_feedback, time);
+        front_steering_feedback, rear_steering_feedback, wheel_base, time);
     }
   }
 
@@ -313,83 +377,56 @@ controller_interface::return_type DoubleSteeringDriveController::update(
   Eigen::Vector3d v_rear_vec = linear_command_vec + v_rot_r;
 
   double velocity_front = v_front_vec.head<2>().norm()/front_wheel_radius;
+  // velocity_front *= sign_factor_front;
   double velocity_rear = v_rear_vec.head<2>().norm()/rear_wheel_radius;
+  // velocity_rear *= sign_factor_rear;
 
+  //front_steering_angle 계산
   double target_steering_front = std::atan2(v_front_vec.y(), v_front_vec.x());
+  double front_steering_delta = target_steering_front - last_front_steering_angle_;
+  front_steering_delta = wrapAngle(front_steering_delta);
+
+  // 3) delta가 90도(π/2) 초과면 flip
+  if (std::abs(front_steering_delta) > M_PI / 2.0) {
+    // 각도를 180도 돌려서 최소 회전각으로 유지
+    target_steering_front = wrapAngle(target_steering_front + M_PI);
+    // 속도 반전
+    velocity_front *= -1.0;
+
+    // delta 재계산
+    front_steering_delta = target_steering_front - last_front_steering_angle_;
+    front_steering_delta = wrapAngle(front_steering_delta);
+  }
+  //
+  cumulative_front_steering_angle_ += front_steering_delta;
+
+  last_front_steering_angle_ = target_steering_front;
+
+  double steering_angle_front = cumulative_front_steering_angle_;
+  double steering_front_turns = cumulative_front_steering_angle_ / (2.0 * M_PI);
+
   double target_steering_rear = std::atan2(v_rear_vec.y(), v_rear_vec.x());
-
-  // Calculate steering angle continuity
-  // ----------------------------
-  // Front wheel
-  // ----------------------------
-
-  // Step 1. Compute raw delta
-  double delta_angle_front = target_steering_front - front_steering_feedback;
-
-  // Step 2. Wrap-around to [-pi, pi]
-  delta_angle_front = std::fmod(delta_angle_front + M_PI, 2 * M_PI);
-  if (delta_angle_front < 0)
-      delta_angle_front += 2 * M_PI;
-  delta_angle_front -= M_PI;
-
-  // Step 3. Try first candidate
-  double candidate_angle_front = front_steering_feedback + delta_angle_front;
-
-  if (std::abs(candidate_angle_front) > params_.max_steering_angle) {
-      // Step 4. Try flipping direction
-      if (delta_angle_front > 0) {
-          delta_angle_front -= 2.0 * M_PI;
-      } else {
-          delta_angle_front += 2.0 * M_PI;
-      }
-      candidate_angle_front = front_steering_feedback + delta_angle_front;
-
-      // Step 5. Clamp if still exceeds limit
-      if (std::abs(candidate_angle_front) > params_.max_steering_angle) {
-          if (candidate_angle_front > 0) {
-              candidate_angle_front = params_.max_steering_angle;
-          } else {
-              candidate_angle_front = params_.min_steering_angle;
-          }
-      } else {
-          // If flip succeeded, wheel velocity must flip as well
-          velocity_front = -velocity_front;
-      }
+  double rear_steering_delta = target_steering_rear - last_rear_steering_angle_;
+  rear_steering_delta = wrapAngle(rear_steering_delta);
+  // 3) delta가 90도(π/2) 초과면 flip
+  if (std::abs(rear_steering_delta) > M_PI / 2.0) {
+    // 각도를 180도 돌려서 최소 회전각으로 유지
+    target_steering_rear = wrapAngle(target_steering_rear + M_PI);
+    // 속도 반전
+    velocity_rear *= -1.0;
+    // delta 재계산
+    rear_steering_delta = target_steering_rear - last_rear_steering_angle_;
+    rear_steering_delta = wrapAngle(rear_steering_delta);
   }
+  cumulative_rear_steering_angle_ += rear_steering_delta;
+  last_rear_steering_angle_ = target_steering_rear;
 
-  // 최종 steering angle
-  double steering_angle_front = candidate_angle_front;
-  
-  double delta_angle_rear = target_steering_rear - rear_steering_feedback;
+  double steering_angle_rear = cumulative_rear_steering_angle_;
+  double steering_rear_turns = cumulative_rear_steering_angle_ / (2.0 * M_PI);
 
-  // Wrap-around to [-pi, pi]
-  delta_angle_rear = std::fmod(delta_angle_rear + M_PI, 2 * M_PI);
-  if (delta_angle_rear < 0)
-      delta_angle_rear += 2 * M_PI;
-  delta_angle_rear -= M_PI;
-
-  double candidate_angle_rear = rear_steering_feedback + delta_angle_rear;
-
-  if (std::abs(candidate_angle_rear) > params_.max_steering_angle) {
-      if (delta_angle_rear > 0) {
-          delta_angle_rear -= 2.0 * M_PI;
-      } else {
-          delta_angle_rear += 2.0 * M_PI;
-      }
-      candidate_angle_rear = rear_steering_feedback + delta_angle_rear;
-
-      if (std::abs(candidate_angle_rear) > params_.max_steering_angle) {
-          if (candidate_angle_rear > 0) {
-              candidate_angle_rear = params_.max_steering_angle;
-          } else {
-              candidate_angle_rear = params_.min_steering_angle;
-          }
-      } else {
-          velocity_rear = -velocity_rear;
-      }
-  }
-
-  double steering_angle_rear = candidate_angle_rear;
+  // RCLCPP_INFO(
+  //   logger, "Front steering angle: %.2f rad (%.2f turns), Rear steering angle: %.2f rad (%.2f turns)",
+  //   steering_angle_front, steering_front_turns, steering_angle_rear, steering_rear_turns);
 
   // Update steering angles
   registered_front_steering_handle_->position.get().set_value(steering_angle_front);
@@ -602,6 +639,10 @@ controller_interface::CallbackReturn DoubleSteeringDriveController::on_configure
   odometry_transform_message.transforms.front().child_frame_id = base_frame_id;
 
   previous_update_timestamp_ = get_node()->get_clock()->now();
+
+  steering_marker_pub_ = get_node()->create_publisher<visualization_msgs::msg::Marker>(
+    "steering_angle_markers", rclcpp::SystemDefaultsQoS());
+
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
@@ -719,6 +760,13 @@ void DoubleSteeringDriveController::halt()
 
   halt_wheels(registered_front_wheel_handles_);
   halt_wheels(registered_rear_wheel_handles_);
+}
+
+double DoubleSteeringDriveController::wrapAngle(double angle)
+{
+  while (angle > M_PI) angle -= 2.0 * M_PI;
+  while (angle < -M_PI) angle += 2.0 * M_PI;
+  return angle;
 }
 
 controller_interface::CallbackReturn DoubleSteeringDriveController::configure_wheel_side(
