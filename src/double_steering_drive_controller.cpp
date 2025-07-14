@@ -188,7 +188,10 @@ controller_interface::return_type DoubleSteeringDriveController::update(
     {
       const double front_wheel_feedback = registered_front_wheel_handles_[index].feedback.get().get_value();
       const double rear_wheel_feedback = registered_rear_wheel_handles_[index].feedback.get().get_value();
-      
+
+      // RCLCPP_INFO(logger, "Front Wheel Feedback: %f, Rear Wheel Feedback: %f",
+      //             front_wheel_feedback, rear_wheel_feedback);
+
       // 피드백 값이 유효하지 않은 경우 에러 처리
       if (std::isnan(front_wheel_feedback) || std::isnan(rear_wheel_feedback))
       {
@@ -206,6 +209,9 @@ controller_interface::return_type DoubleSteeringDriveController::update(
       // 평균 계산
       front_wheel_feedback_mean /= static_cast<double>(params_.wheels_per_side);
       rear_wheel_feedback_mean /= static_cast<double>(params_.wheels_per_side);
+
+      // RCLCPP_INFO(logger, "Front Wheel Feedback Mean: %f, Rear Wheel Feedback Mean: %f",
+      //             front_wheel_feedback_mean, rear_wheel_feedback_mean);
 
     // 전방 및 후방 스티어링의 피드백 값을 계산
     front_steering_feedback = registered_front_steering_handle_->feedback.get().get_value();
@@ -283,12 +289,24 @@ controller_interface::return_type DoubleSteeringDriveController::update(
     // 위치 피드백을 사용하는 경우
     if (params_.position_feedback)
     {
+      // RCLCPP_INFO(logger, "Front Wheel Feedback Mean: %f, Rear Wheel Feedback Mean: %f",
+      //             front_wheel_feedback_mean, rear_wheel_feedback_mean);
+      // RCLCPP_INFO(logger, "Front Steering Feedback: %f, Rear Steering Feedback: %f",
+      //             front_steering_feedback, rear_steering_feedback);
+      // RCLCPP_INFO(logger, "Front Wheel vel: %f, Rear Wheel vel: %f",
+      //             front_wheel_feedback_mean * front_wheel_radius * period.seconds(), rear_wheel_feedback_mean * rear_wheel_radius * period.seconds());            
       // 바퀴 위치 피드백을 사용하여 오도메트리 갱신
       odometry_.update(front_wheel_feedback_mean, rear_wheel_feedback_mean, front_steering_feedback, rear_steering_feedback, wheel_base, time);
     }
     // 속도 피드백을 사용하여 오도메트리 갱신
     else
     {
+      // RCLCPP_INFO(logger, "Front Wheel Feedback Mean: %f, Rear Wheel Feedback Mean: %f",
+      //             front_wheel_feedback_mean, rear_wheel_feedback_mean);
+      // RCLCPP_INFO(logger, "Front Steering Feedback: %f, Rear Steering Feedback: %f",
+      //             front_steering_feedback, rear_steering_feedback);
+      // RCLCPP_INFO(logger, "Front Wheel vel: %f, Rear Wheel vel: %f",
+      //             front_wheel_feedback_mean * front_wheel_radius * period.seconds(), rear_wheel_feedback_mean * rear_wheel_radius * period.seconds());
       odometry_.updateFromVelocity(
         front_wheel_feedback_mean * front_wheel_radius * period.seconds(),
         rear_wheel_feedback_mean * rear_wheel_radius * period.seconds(),
@@ -435,11 +453,14 @@ controller_interface::return_type DoubleSteeringDriveController::update(
     front_steering_delta = wrapAngle(front_steering_delta);
   }
 
-  double scale_front = computeSpeedScale(abs(front_steering_delta), 
-                                         params_.min_phi_delta, 
-                                         params_.max_phi_delta, 
-                                         params_.steering_speed_scale_exponent, 
-                                         params_.min_reduced_scale);
+  double scale_front = 1.0;
+  if(params_.reduce_wheel_speed_until_steering_reached) {
+    scale_front = computeSpeedScale(abs(front_steering_delta), 
+                                     params_.min_phi_delta, 
+                                     params_.max_phi_delta, 
+                                     params_.steering_speed_scale_exponent, 
+                                     params_.min_reduced_scale);
+  }
   velocity_front *= scale_front;
 
   // 4) delta가 허용 범위를 초과하면 제한
@@ -507,11 +528,14 @@ controller_interface::return_type DoubleSteeringDriveController::update(
   // rear wheel속도 스케일링
   // 조향 각도 변화량에 따라 속도를 조정
   // 조향 각도 변화량이 클수록 속도를 줄입니다.
-  double scale_rear = computeSpeedScale(abs(rear_steering_delta),
-                                        params_.min_phi_delta,
-                                        params_.max_phi_delta,
-                                        params_.steering_speed_scale_exponent,
-                                        params_.min_reduced_scale);
+  double scale_rear = 1.0;
+  if(params_.reduce_wheel_speed_until_steering_reached) {
+    scale_rear = computeSpeedScale(abs(rear_steering_delta),
+                                   params_.min_phi_delta,
+                                   params_.max_phi_delta,
+                                   params_.steering_speed_scale_exponent,
+                                   params_.min_reduced_scale);
+  }
   velocity_rear *= scale_rear;
 
   if (rear_steering_delta >= max_steering_delta) {
