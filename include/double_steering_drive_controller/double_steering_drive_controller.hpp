@@ -174,6 +174,8 @@ protected:
 
   double last_front_steering_angle_ = 0.0;
   double last_rear_steering_angle_ = 0.0;
+  double last_front_wheel_velocity_ = 0.0;
+  double last_rear_wheel_velocity_ = 0.0;
 
   double cumulative_front_steering_angle_ = 0.0; // 누적된 앞바퀴 스티어링 각도
   double cumulative_rear_steering_angle_ = 0.0; // 누적된 뒷바퀴 스티어링 각도

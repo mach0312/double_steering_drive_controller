@@ -288,25 +288,13 @@ controller_interface::return_type DoubleSteeringDriveController::update(
 
     // 위치 피드백을 사용하는 경우
     if (params_.position_feedback)
-    {
-      // RCLCPP_INFO(logger, "Front Wheel Feedback Mean: %f, Rear Wheel Feedback Mean: %f",
-      //             front_wheel_feedback_mean, rear_wheel_feedback_mean);
-      // RCLCPP_INFO(logger, "Front Steering Feedback: %f, Rear Steering Feedback: %f",
-      //             front_steering_feedback, rear_steering_feedback);
-      // RCLCPP_INFO(logger, "Front Wheel vel: %f, Rear Wheel vel: %f",
-      //             front_wheel_feedback_mean * front_wheel_radius * period.seconds(), rear_wheel_feedback_mean * rear_wheel_radius * period.seconds());            
+    {           
       // 바퀴 위치 피드백을 사용하여 오도메트리 갱신
       odometry_.update(front_wheel_feedback_mean, rear_wheel_feedback_mean, front_steering_feedback, rear_steering_feedback, wheel_base, time);
     }
     // 속도 피드백을 사용하여 오도메트리 갱신
     else
     {
-      // RCLCPP_INFO(logger, "Front Wheel Feedback Mean: %f, Rear Wheel Feedback Mean: %f",
-      //             front_wheel_feedback_mean, rear_wheel_feedback_mean);
-      // RCLCPP_INFO(logger, "Front Steering Feedback: %f, Rear Steering Feedback: %f",
-      //             front_steering_feedback, rear_steering_feedback);
-      // RCLCPP_INFO(logger, "Front Wheel vel: %f, Rear Wheel vel: %f",
-      //             front_wheel_feedback_mean * front_wheel_radius * period.seconds(), rear_wheel_feedback_mean * rear_wheel_radius * period.seconds());
       odometry_.updateFromVelocity(
         front_wheel_feedback_mean * front_wheel_radius * period.seconds(),
         rear_wheel_feedback_mean * rear_wheel_radius * period.seconds(),
@@ -415,6 +403,9 @@ controller_interface::return_type DoubleSteeringDriveController::update(
   double target_steering_front;
   if (old_updated || zero_command) {
     target_steering_front = last_front_steering_angle_; // 이전 업데이트가 오래된 경우 last_front_steering_angle_를 사용
+    if(last_front_wheel_velocity_ < 0.0) {
+      velocity_front *= -1.0; // 앞바퀴 속도가 음수이면 앞바퀴 속도 반전
+    }
   }
   else{
     target_steering_front = atan2(v_front_vec.y(), v_front_vec.x());
@@ -480,6 +471,7 @@ controller_interface::return_type DoubleSteeringDriveController::update(
   cumulative_front_steering_angle_ += front_steering_delta;
 
   double steering_angle_front = last_front_steering_angle_;
+  last_front_wheel_velocity_ = velocity_front;
   // double steering_front_turns = cumulative_front_steering_angle_ / (2.0 * M_PI);
 
 
@@ -488,6 +480,9 @@ controller_interface::return_type DoubleSteeringDriveController::update(
   double target_steering_rear;
   if (old_updated || zero_command) {
     target_steering_rear = last_rear_steering_angle_; // 이전 업데이트가 오래된 경우 last_rear_steering_angle_를 사용
+    if(last_rear_wheel_velocity_ < 0.0) {
+      velocity_rear *= -1.0; // 앞바퀴 속도가 음수이면 뒷바퀴 속도도 반전
+    }
   }
   else{
     target_steering_rear = atan2(v_rear_vec.y(), v_rear_vec.x());
@@ -553,6 +548,7 @@ controller_interface::return_type DoubleSteeringDriveController::update(
   cumulative_rear_steering_angle_ += rear_steering_delta;
 
   double steering_angle_rear = last_rear_steering_angle_;
+  last_rear_wheel_velocity_ = velocity_rear;
   // double steering_rear_turns = cumulative_rear_steering_angle_ / (2.0 * M_PI);
 
 
