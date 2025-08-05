@@ -393,6 +393,9 @@ controller_interface::return_type DoubleSteeringDriveController::update(
 
   double velocity_front = v_front_vec.head<2>().norm()/front_wheel_radius;
   double velocity_rear = v_rear_vec.head<2>().norm()/rear_wheel_radius;
+  // RCLCPP_INFO(
+  //   logger, "Front wheel velocity: %.2f m/s, Rear wheel velocity: %.2f m/s",
+  //   velocity_front, velocity_rear);
 
   // 최대 조향 각도 변화량 계산
   double dt = period.seconds();
@@ -403,6 +406,7 @@ controller_interface::return_type DoubleSteeringDriveController::update(
   double target_steering_front;
   if (old_updated || zero_command) {
     target_steering_front = last_front_steering_angle_; // 이전 업데이트가 오래된 경우 last_front_steering_angle_를 사용
+    // 정지 시 속도가 음수이면 앞바퀴 속도 반전
     if(last_front_wheel_velocity_ < 0.0) {
       velocity_front *= -1.0; // 앞바퀴 속도가 음수이면 앞바퀴 속도 반전
     }
@@ -432,8 +436,8 @@ controller_interface::return_type DoubleSteeringDriveController::update(
   if (abs(predictive_cumulative_front_steering_angle_) > params_.max_steering_angle)
   {
     RCLCPP_WARN(
-      logger, "\033[33mFront steering angle exceeds max limit, flipping direction. "
-              "Cumulative front steering angle: %.2f rad, Max limit: %.2f rad\033[0m",
+      logger, "Front steering angle exceeds max limit, flipping direction. "
+              "Cumulative front steering angle: %.2f rad, Max limit: %.2f rad",
       predictive_cumulative_front_steering_angle_, params_.max_steering_angle);
     // 각도를 180도 돌려서 최소 회전각으로 유지
     target_steering_front = wrapAngle(target_steering_front + M_PI);
@@ -447,7 +451,6 @@ controller_interface::return_type DoubleSteeringDriveController::update(
   double scale_front = 1.0;
   if(params_.reduce_wheel_speed_until_steering_reached) {
     scale_front = computeSpeedScale(abs(front_steering_delta), 
-                                     params_.min_phi_delta, 
                                      params_.max_phi_delta, 
                                      params_.steering_speed_scale_exponent, 
                                      params_.min_reduced_scale);
@@ -471,7 +474,7 @@ controller_interface::return_type DoubleSteeringDriveController::update(
   cumulative_front_steering_angle_ += front_steering_delta;
 
   double steering_angle_front = last_front_steering_angle_;
-  last_front_wheel_velocity_ = velocity_front;
+  // last_front_wheel_velocity_ = velocity_front;
   // double steering_front_turns = cumulative_front_steering_angle_ / (2.0 * M_PI);
 
 
@@ -480,6 +483,7 @@ controller_interface::return_type DoubleSteeringDriveController::update(
   double target_steering_rear;
   if (old_updated || zero_command) {
     target_steering_rear = last_rear_steering_angle_; // 이전 업데이트가 오래된 경우 last_rear_steering_angle_를 사용
+    // 정지 시 속도가 음수이면 뒷바퀴 속도 반전
     if(last_rear_wheel_velocity_ < 0.0) {
       velocity_rear *= -1.0; // 앞바퀴 속도가 음수이면 뒷바퀴 속도도 반전
     }
@@ -508,8 +512,8 @@ controller_interface::return_type DoubleSteeringDriveController::update(
   if (abs(predictive_cumulative_rear_steering_angle_) > params_.max_steering_angle)
   {
     RCLCPP_WARN(
-      logger, "\033[33mRear steering angle exceeds max limit, flipping direction. "
-              "Cumulative rear steering angle: %.2f rad, Max limit: %.2f rad\033[0m",
+      logger, "Rear steering angle exceeds max limit, flipping direction. "
+              "Cumulative rear steering angle: %.2f rad, Max limit: %.2f rad",
       predictive_cumulative_rear_steering_angle_, params_.max_steering_angle);
     // 각도를 180도 돌려서 최소 회전각으로 유지
     target_steering_rear = wrapAngle(target_steering_rear + M_PI);
@@ -526,7 +530,6 @@ controller_interface::return_type DoubleSteeringDriveController::update(
   double scale_rear = 1.0;
   if(params_.reduce_wheel_speed_until_steering_reached) {
     scale_rear = computeSpeedScale(abs(rear_steering_delta),
-                                   params_.min_phi_delta,
                                    params_.max_phi_delta,
                                    params_.steering_speed_scale_exponent,
                                    params_.min_reduced_scale);
@@ -548,8 +551,14 @@ controller_interface::return_type DoubleSteeringDriveController::update(
   cumulative_rear_steering_angle_ += rear_steering_delta;
 
   double steering_angle_rear = last_rear_steering_angle_;
-  last_rear_wheel_velocity_ = velocity_rear;
+  
   // double steering_rear_turns = cumulative_rear_steering_angle_ / (2.0 * M_PI);
+
+  velocity_front *= scale_rear; // 뒷바퀴 스티어링에 맞춰 앞바퀴 속도 조정
+  velocity_rear *= scale_front; // 앞바퀴 스티어링에 맞춰 뒷바퀴 속도 조정
+  
+  last_front_wheel_velocity_ = velocity_front;
+  last_rear_wheel_velocity_ = velocity_rear;
 
 
   // RCLCPP_INFO(
@@ -897,7 +906,7 @@ double DoubleSteeringDriveController::wrapAngle(double angle)
   return angle;
 }
 
-double DoubleSteeringDriveController::computeSpeedScale(double phi_delta, double min_phi_delta, double max_phi_delta, double p, double min_scale)
+double DoubleSteeringDriveController::computeSpeedScale(double phi_delta, double max_phi_delta, double p, double min_scale)
 {
   phi_delta = std::max(phi_delta, 0.0);
 
